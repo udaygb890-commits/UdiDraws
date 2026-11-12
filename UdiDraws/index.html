@@ -1,0 +1,1802 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UdiDraw ✨ — Air Drawing Studio</title>
+  <meta name="description" content="UdiDraw is a gesture-controlled air-drawing canvas studio powered by MediaPipe Hands. Draw in the air using just your webcam!" />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            display: ['Outfit', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            surface: {
+              50: '#f8fafc',
+              100: '#1e1e2e',
+              200: '#181825',
+              300: '#11111b',
+              400: '#0a0a14',
+            },
+            neon: {
+              blue: '#00d4ff',
+              green: '#00ff88',
+              pink: '#ff2d95',
+              yellow: '#ffcc00',
+              white: '#ffffff',
+              purple: '#a855f7',
+            }
+          },
+          animation: {
+            'pulse-glow': 'pulseGlow 2s ease-in-out infinite',
+            'slide-in-right': 'slideInRight 0.35s cubic-bezier(0.16,1,0.3,1)',
+            'slide-out-right': 'slideOutRight 0.3s cubic-bezier(0.16,1,0.3,1)',
+            'fade-in': 'fadeIn 0.4s ease-out',
+            'fade-in-up': 'fadeInUp 0.5s cubic-bezier(0.16,1,0.3,1)',
+            'float': 'float 3s ease-in-out infinite',
+            'shake': 'shake 0.5s ease-in-out',
+          },
+          keyframes: {
+            pulseGlow: {
+              '0%, 100%': { opacity: 0.6 },
+              '50%': { opacity: 1 },
+            },
+            slideInRight: {
+              '0%': { transform: 'translateX(100%)', opacity: 0 },
+              '100%': { transform: 'translateX(0)', opacity: 1 },
+            },
+            slideOutRight: {
+              '0%': { transform: 'translateX(0)', opacity: 1 },
+              '100%': { transform: 'translateX(100%)', opacity: 0 },
+            },
+            fadeIn: {
+              '0%': { opacity: 0, transform: 'translateY(8px)' },
+              '100%': { opacity: 1, transform: 'translateY(0)' },
+            },
+            fadeInUp: {
+              '0%': { opacity: 0, transform: 'translateY(16px)' },
+              '100%': { opacity: 1, transform: 'translateY(0)' },
+            },
+            float: {
+              '0%, 100%': { transform: 'translateY(0)' },
+              '50%': { transform: 'translateY(-6px)' },
+            },
+            shake: {
+              '0%, 100%': { transform: 'translateX(0)' },
+              '20%': { transform: 'translateX(-6px)' },
+              '40%': { transform: 'translateX(6px)' },
+              '60%': { transform: 'translateX(-4px)' },
+              '80%': { transform: 'translateX(4px)' },
+            },
+          },
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- MediaPipe Hands & Camera Utils via jsDelivr CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <style>
+    /* ——————————————————————————————————————
+       BASE RESETS & GLOBAL STYLES
+       —————————————————————————————————————— */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #0a0a14;
+      color: #e2e8f0;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+
+    /* ——————————————————————————————————————
+       CANVAS LAYERS
+       —————————————————————————————————————— */
+    #canvas-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    #canvas-container canvas,
+    #canvas-container video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #webcam-video {
+      transform: scaleX(-1);
+      object-fit: cover;
+      z-index: 1;
+      opacity: 0.25;
+    }
+
+    #overlay-canvas {
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    #drawing-canvas {
+      z-index: 3;
+      pointer-events: none;
+    }
+
+    /* ——————————————————————————————————————
+       GLASSMORPHISM PANELS
+       —————————————————————————————————————— */
+    .glass {
+      background: rgba(30, 30, 46, 0.72);
+      backdrop-filter: blur(20px) saturate(1.5);
+      -webkit-backdrop-filter: blur(20px) saturate(1.5);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .glass-strong {
+      background: rgba(24, 24, 37, 0.88);
+      backdrop-filter: blur(30px) saturate(1.8);
+      -webkit-backdrop-filter: blur(30px) saturate(1.8);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    /* ——————————————————————————————————————
+       COLOR SWATCHES
+       —————————————————————————————————————— */
+    .color-swatch {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.16,1,0.3,1);
+      position: relative;
+      border: 2.5px solid transparent;
+    }
+
+    .color-swatch:hover {
+      transform: scale(1.2);
+      box-shadow: 0 0 20px var(--swatch-color);
+    }
+
+    .color-swatch.active {
+      border-color: white;
+      box-shadow: 0 0 16px var(--swatch-color), 0 0 4px rgba(255,255,255,0.4);
+      transform: scale(1.15);
+    }
+
+    /* ——————————————————————————————————————
+       TOOL BUTTONS
+       —————————————————————————————————————— */
+    .tool-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.6);
+      font-size: 18px;
+    }
+
+    .tool-btn:hover {
+      background: rgba(255,255,255,0.12);
+      color: white;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    }
+
+    .tool-btn.active {
+      background: rgba(0, 212, 255, 0.15);
+      border-color: rgba(0, 212, 255, 0.4);
+      color: #00d4ff;
+      box-shadow: 0 0 16px rgba(0, 212, 255, 0.15);
+    }
+
+    .tool-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    /* ——————————————————————————————————————
+       STATUS DOT INDICATOR
+       —————————————————————————————————————— */
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .status-dot.active  { background: #00ff88; box-shadow: 0 0 8px #00ff88; }
+    .status-dot.inactive { background: #ff4444; box-shadow: 0 0 8px #ff4444; }
+    .status-dot.loading  { background: #ffcc00; box-shadow: 0 0 8px #ffcc00; animation: pulseGlow 1.5s infinite; }
+
+    /* ——————————————————————————————————————
+       GESTURE INDICATOR PILL
+       —————————————————————————————————————— */
+    #gesture-indicator {
+      transition: all 0.3s ease;
+    }
+
+    /* ——————————————————————————————————————
+       SIDEBAR
+       —————————————————————————————————————— */
+    #sidebar {
+      transition: transform 0.35s cubic-bezier(0.16,1,0.3,1), opacity 0.3s ease;
+    }
+    #sidebar.closed {
+      transform: translateX(100%);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* ——————————————————————————————————————
+       BRUSH SIZE SLIDER
+       —————————————————————————————————————— */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 2px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #00d4ff;
+      cursor: pointer;
+      box-shadow: 0 0 8px rgba(0,212,255,0.4);
+    }
+
+    /* ——————————————————————————————————————
+       TOOLTIPS
+       —————————————————————————————————————— */
+    [data-tooltip] {
+      position: relative;
+    }
+    [data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%) scale(0.9);
+      background: rgba(17,17,27,0.95);
+      color: white;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.2s ease;
+      border: 1px solid rgba(255,255,255,0.1);
+      z-index: 50;
+    }
+    [data-tooltip]:hover::after {
+      opacity: 1;
+      transform: translateX(-50%) scale(1);
+    }
+
+    /* ——————————————————————————————————————
+       STARTUP OVERLAY
+       —————————————————————————————————————— */
+    #startup-overlay {
+      z-index: 100;
+      transition: opacity 0.6s ease, visibility 0.6s ease;
+    }
+    #startup-overlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    /* ——————————————————————————————————————
+       GESTURE HOVER HIGHLIGHT ON TOOLBAR
+       —————————————————————————————————————— */
+    .gesture-hover {
+      box-shadow: 0 0 20px rgba(168, 85, 247, 0.5) !important;
+      border-color: rgba(168, 85, 247, 0.6) !important;
+    }
+
+    /* ——————————————————————————————————————
+       CAMERA SELECTOR DROPDOWN
+       —————————————————————————————————————— */
+    #camera-select {
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 12px;
+      padding: 5px 28px 5px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      outline: none;
+      max-width: 200px;
+      transition: all 0.2s ease;
+      /* Custom arrow */
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    #camera-select:hover {
+      border-color: rgba(255,255,255,0.2);
+      background-color: rgba(255,255,255,0.1);
+    }
+
+    #camera-select:focus {
+      border-color: rgba(0, 212, 255, 0.5);
+      box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.15);
+    }
+
+    #camera-select option {
+      background: #1e1e2e;
+      color: #e2e8f0;
+      padding: 6px;
+    }
+
+    /* ——————————————————————————————————————
+       ERROR TOAST / BANNER
+       —————————————————————————————————————— */
+    #error-toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(120%);
+      z-index: 200;
+      max-width: 520px;
+      width: calc(100% - 32px);
+      padding: 14px 20px;
+      border-radius: 14px;
+      background: rgba(255, 50, 50, 0.12);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 68, 68, 0.3);
+      color: #fca5a5;
+      font-size: 13px;
+      line-height: 1.5;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      opacity: 0;
+      transition: all 0.4s cubic-bezier(0.16,1,0.3,1);
+      pointer-events: none;
+    }
+
+    #error-toast.visible {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #error-toast .error-icon {
+      font-size: 18px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    #error-toast .error-dismiss {
+      margin-left: auto;
+      flex-shrink: 0;
+      cursor: pointer;
+      opacity: 0.5;
+      transition: opacity 0.2s;
+      font-size: 16px;
+      padding: 0 4px;
+    }
+
+    #error-toast .error-dismiss:hover {
+      opacity: 1;
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ================================================================
+       STARTUP OVERLAY — Camera selection + launch screen
+       ================================================================ -->
+  <div id="startup-overlay" class="fixed inset-0 bg-surface-400 flex items-center justify-center">
+    <div class="text-center animate-fade-in max-w-md px-6">
+      <!-- Branding -->
+      <h1 class="font-display text-6xl font-extrabold bg-gradient-to-r from-neon-blue via-neon-purple to-neon-pink bg-clip-text text-transparent mb-3 animate-float select-none">
+        UdiDraw ✨
+      </h1>
+      <p class="text-white/50 text-lg mb-8 font-light">Air Drawing Studio — Powered by MediaPipe</p>
+
+      <!-- Camera Selector (populated dynamically) -->
+      <div id="camera-picker-section" class="mb-6 animate-fade-in-up" style="animation-delay: 0.15s;">
+        <label for="camera-select-startup" class="block text-xs uppercase tracking-widest text-white/30 mb-2">Select Camera</label>
+        <select id="camera-select-startup" class="w-full max-w-xs mx-auto block"
+                style="
+                  -webkit-appearance: none; appearance: none;
+                  background: rgba(255,255,255,0.06);
+                  border: 1px solid rgba(255,255,255,0.12);
+                  color: #e2e8f0;
+                  font-family: 'Inter', sans-serif;
+                  font-size: 13px;
+                  padding: 10px 32px 10px 14px;
+                  border-radius: 12px;
+                  cursor: pointer;
+                  outline: none;
+                  transition: all 0.2s ease;
+                  background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%2394a3b8%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpolyline points=%276 9 12 15 18 9%27%3E%3C/polyline%3E%3C/svg%3E');
+                  background-repeat: no-repeat;
+                  background-position: right 12px center;
+                ">
+          <option value="">Detecting cameras…</option>
+        </select>
+        <p id="camera-detect-status" class="text-white/25 text-xs mt-2"></p>
+      </div>
+
+      <!-- Start Button -->
+      <button id="btn-start" class="px-8 py-3.5 rounded-2xl font-semibold text-base bg-gradient-to-r from-neon-blue to-neon-purple text-white shadow-lg shadow-neon-blue/20 hover:shadow-neon-blue/40 hover:scale-105 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-neon-blue/50 disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed" disabled>
+        🎥 Enable Camera &amp; Start
+      </button>
+
+      <!-- Error display in startup -->
+      <div id="startup-error" class="mt-5 text-sm text-red-400/80 hidden animate-fade-in"></div>
+
+      <p class="text-white/25 text-xs mt-5">Requires webcam access · Works best in Chrome / Edge</p>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       MAIN APPLICATION SHELL
+       ================================================================ -->
+  <div id="app" class="h-screen w-screen flex flex-col overflow-hidden">
+
+    <!-- ——— HEADER / NAVBAR ——— -->
+    <header id="main-header" class="glass-strong flex items-center justify-between px-4 py-2 z-30 relative shrink-0 gap-2" style="min-height: 52px;">
+
+      <!-- Left: Branding + Status -->
+      <div class="flex items-center gap-3 shrink-0">
+        <h1 class="font-display text-xl font-bold bg-gradient-to-r from-neon-blue to-neon-pink bg-clip-text text-transparent select-none whitespace-nowrap">
+          UdiDraw ✨
+        </h1>
+        <div class="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 text-xs text-white/50">
+          <span id="status-dot" class="status-dot loading"></span>
+          <span id="status-text">Initializing…</span>
+        </div>
+      </div>
+
+      <!-- Center: Gesture indicator -->
+      <div id="gesture-indicator" class="hidden sm:flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/5 text-sm text-white/60 shrink-0">
+        <span id="gesture-icon">👋</span>
+        <span id="gesture-label">No Hand</span>
+      </div>
+
+      <!-- Right: Camera selector, FPS, Help -->
+      <div class="flex items-center gap-2 sm:gap-3 shrink-0">
+        <!-- In-app Camera Selector Dropdown -->
+        <div class="hidden sm:flex items-center gap-1.5">
+          <span class="text-[10px] text-white/30">📷</span>
+          <select id="camera-select" title="Switch camera device">
+            <option value="">No cameras</option>
+          </select>
+        </div>
+
+        <!-- FPS Counter -->
+        <div class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 text-xs font-mono text-white/40">
+          <span id="fps-display">0</span> FPS
+        </div>
+
+        <!-- Help Toggle -->
+        <button id="btn-toggle-sidebar" class="tool-btn !w-9 !h-9 !rounded-full" data-tooltip="Help & Gestures">
+          <span>❓</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ——— MAIN CONTENT AREA ——— -->
+    <div class="flex flex-1 overflow-hidden relative">
+
+      <!-- ——— TOOLBAR (LEFT SIDEBAR) ——— -->
+      <aside id="toolbar" class="glass-strong flex flex-col items-center py-4 px-2 gap-4 z-20 relative shrink-0" style="width: 62px;">
+
+        <!-- Colors -->
+        <div class="flex flex-col gap-2.5 items-center">
+          <span class="text-[10px] uppercase tracking-widest text-white/30 mb-1">Color</span>
+          <div id="swatch-cyan"   class="color-swatch active" style="background:#00d4ff; --swatch-color:#00d4ff;" data-color="#00d4ff" data-tooltip="Neon Cyan"></div>
+          <div id="swatch-pink"   class="color-swatch"        style="background:#ff2d95; --swatch-color:#ff2d95;" data-color="#ff2d95" data-tooltip="Electric Pink"></div>
+          <div id="swatch-green"  class="color-swatch"        style="background:#00ff88; --swatch-color:#00ff88;" data-color="#00ff88" data-tooltip="Emerald Green"></div>
+          <div id="swatch-yellow" class="color-swatch"        style="background:#ffcc00; --swatch-color:#ffcc00;" data-color="#ffcc00" data-tooltip="Sunburst Yellow"></div>
+          <div id="swatch-white"  class="color-swatch"        style="background:#ffffff; --swatch-color:#ffffff;" data-color="#ffffff" data-tooltip="Pure White"></div>
+        </div>
+
+        <div class="w-8 h-px bg-white/10"></div>
+
+        <!-- Tools -->
+        <div class="flex flex-col gap-2 items-center">
+          <span class="text-[10px] uppercase tracking-widest text-white/30 mb-1">Tool</span>
+          <button id="tool-brush"  class="tool-btn active" data-tooltip="Brush"  data-tool="brush">🖌️</button>
+          <button id="tool-eraser" class="tool-btn"        data-tooltip="Eraser" data-tool="eraser">🧹</button>
+        </div>
+
+        <div class="w-8 h-px bg-white/10"></div>
+
+        <!-- Brush Size (Vertical Slider) -->
+        <div class="flex flex-col items-center gap-1.5 w-full px-1">
+          <span class="text-[10px] uppercase tracking-widest text-white/30">Size</span>
+          <input id="brush-size" type="range" min="2" max="30" value="10"
+                 style="writing-mode: vertical-lr; direction: rtl; height: 80px; width: 4px;" />
+          <span id="brush-size-label" class="text-[10px] text-white/40 font-mono">10</span>
+        </div>
+
+        <div class="w-8 h-px bg-white/10"></div>
+
+        <!-- Undo / Redo -->
+        <div class="flex flex-col gap-2 items-center">
+          <span class="text-[10px] uppercase tracking-widest text-white/30 mb-1">Edit</span>
+          <button id="tool-undo" class="tool-btn" data-tooltip="Undo" disabled>↩️</button>
+          <button id="tool-redo" class="tool-btn" data-tooltip="Redo" disabled>↪️</button>
+        </div>
+
+        <div class="w-8 h-px bg-white/10"></div>
+
+        <!-- Clear & Save -->
+        <div class="flex flex-col gap-2 items-center mt-auto">
+          <button id="tool-clear" class="tool-btn" data-tooltip="Clear Canvas">🗑️</button>
+          <button id="tool-save"  class="tool-btn" data-tooltip="Save PNG">💾</button>
+        </div>
+      </aside>
+
+      <!-- ——— CANVAS AREA ——— -->
+      <main id="canvas-container" class="flex-1 relative bg-surface-400 overflow-hidden">
+        <video id="webcam-video" autoplay playsinline muted></video>
+        <canvas id="overlay-canvas"></canvas>
+        <canvas id="drawing-canvas"></canvas>
+
+        <!-- Floating cursor ring (follows fingertip) -->
+        <div id="cursor-ring"
+             class="absolute pointer-events-none z-10 rounded-full border-2 border-white/40 transition-all duration-75"
+             style="width:30px; height:30px; display:none; transform:translate(-50%,-50%);"></div>
+      </main>
+
+      <!-- ——— SIDEBAR / GESTURE GUIDE (RIGHT) ——— -->
+      <aside id="sidebar" class="glass-strong absolute right-0 top-0 h-full w-80 z-20 overflow-y-auto p-5 closed">
+        <div class="flex items-center justify-between mb-5">
+          <h2 class="font-display text-lg font-bold text-white">Gesture Guide</h2>
+          <button id="btn-close-sidebar" class="tool-btn !w-8 !h-8 !rounded-full !text-sm">✕</button>
+        </div>
+
+        <div class="space-y-4 text-sm text-white/70 leading-relaxed">
+          <!-- Hover / Idle -->
+          <div class="p-3.5 rounded-xl bg-white/5 border border-white/5">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">👋</span>
+              <span class="font-semibold text-white text-base">Hover / Idle</span>
+            </div>
+            <p>Hand detected but no drawing gesture active. A cursor tracker follows your index fingertip.</p>
+          </div>
+
+          <!-- Draw Mode -->
+          <div class="p-3.5 rounded-xl bg-white/5 border border-white/5">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">☝️</span>
+              <span class="font-semibold text-white text-base">Draw Mode</span>
+            </div>
+            <p>Extend <strong class="text-neon-blue">only your Index Finger</strong> (fold middle, ring &amp; pinky). Draws continuous strokes on canvas.</p>
+          </div>
+
+          <!-- Select Mode -->
+          <div class="p-3.5 rounded-xl bg-white/5 border border-white/5">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">✌️</span>
+              <span class="font-semibold text-white text-base">Select Mode</span>
+            </div>
+            <p>Extend <strong class="text-neon-purple">Index + Middle fingers</strong> (peace sign). Hover over toolbar items to pick colors, tools, or actions.</p>
+          </div>
+
+          <!-- Erase Mode (Closed Fist) -->
+          <div class="p-3.5 rounded-xl bg-white/5 border border-white/5">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">✊</span>
+              <span class="font-semibold text-red-400 text-base">Erase Mode — Closed Fist</span>
+            </div>
+            <p>Curl <strong class="text-red-400">all fingers into a closed fist</strong> (index, middle, ring &amp; pinky folded). Instantly erases canvas strokes in mid-air!</p>
+          </div>
+
+          <!-- Select Mode (3 fingers) -->
+          <div class="p-3.5 rounded-xl bg-white/5 border border-white/5">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">🧹</span>
+              <span class="font-semibold text-orange-400 text-base">Air Erase — 3 Fingers</span>
+            </div>
+            <p>Extend <strong class="text-orange-400">Index + Middle + Ring fingers</strong> to erase a wide area. Acts as a brush eraser pass over the canvas.</p>
+          </div>
+
+          <!-- Tips -->
+          <div class="p-3.5 rounded-xl bg-neon-blue/5 border border-neon-blue/10">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">💡</span>
+              <span class="font-semibold text-neon-blue text-base">Tips</span>
+            </div>
+            <ul class="list-disc list-inside space-y-1 text-white/60">
+              <li>Keep hand ~1–2 ft from camera</li>
+              <li>Good lighting improves tracking accuracy</li>
+              <li>Move slowly for smoother lines</li>
+              <li>Use ✌️ to hover over toolbar buttons</li>
+              <li>Use ✊ closed fist to erase in air</li>
+              <li>Use 3 fingers (Index + Middle + Ring) for wide erasing</li>
+              <li>You can also click toolbar items with your mouse</li>
+              <li>Switch cameras from the header dropdown</li>
+            </ul>
+          </div>
+
+          <!-- Keyboard Shortcuts -->
+          <div class="p-3.5 rounded-xl bg-white/5 border border-white/5">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">⌨️</span>
+              <span class="font-semibold text-white text-base">Keyboard Shortcuts</span>
+            </div>
+            <ul class="space-y-1.5 text-white/60">
+              <li><kbd class="px-1.5 py-0.5 bg-white/10 rounded text-[11px] font-mono">Ctrl+Z</kbd> Undo</li>
+              <li><kbd class="px-1.5 py-0.5 bg-white/10 rounded text-[11px] font-mono">Ctrl+Y</kbd> Redo</li>
+              <li><kbd class="px-1.5 py-0.5 bg-white/10 rounded text-[11px] font-mono">B</kbd> Brush</li>
+              <li><kbd class="px-1.5 py-0.5 bg-white/10 rounded text-[11px] font-mono">E</kbd> Eraser</li>
+              <li><kbd class="px-1.5 py-0.5 bg-white/10 rounded text-[11px] font-mono">S</kbd> Save PNG</li>
+              <li><kbd class="px-1.5 py-0.5 bg-white/10 rounded text-[11px] font-mono">C</kbd> Clear canvas</li>
+            </ul>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       ERROR TOAST (floating, bottom-center)
+       ================================================================ -->
+  <div id="error-toast">
+    <span class="error-icon">⚠️</span>
+    <span id="error-toast-msg">An error occurred.</span>
+    <span class="error-dismiss" id="error-toast-dismiss">✕</span>
+  </div>
+
+  <!-- ================================================================
+       MAIN APPLICATION SCRIPT
+       ================================================================ -->
+  <script>
+  (function () {
+    'use strict';
+
+    // ══════════════════════════════════════════
+    // DOM REFERENCES
+    // ══════════════════════════════════════════
+    const $id = (id) => document.getElementById(id);
+
+    const startupOverlay      = $id('startup-overlay');
+    const btnStart            = $id('btn-start');
+    const cameraSelectStartup = $id('camera-select-startup');
+    const cameraDetectStatus  = $id('camera-detect-status');
+    const startupError        = $id('startup-error');
+    const cameraSelectHeader  = $id('camera-select');
+    const videoEl             = $id('webcam-video');
+    const overlayCanvas       = $id('overlay-canvas');
+    const drawingCanvas       = $id('drawing-canvas');
+    const overlayCtx          = overlayCanvas.getContext('2d');
+    const drawCtx             = drawingCanvas.getContext('2d');
+    const cursorRing          = $id('cursor-ring');
+    const fpsDisplay          = $id('fps-display');
+    const statusDot           = $id('status-dot');
+    const statusText          = $id('status-text');
+    const gestureIcon         = $id('gesture-icon');
+    const gestureLabel        = $id('gesture-label');
+    const gestureIndicator    = $id('gesture-indicator');
+    const sidebar             = $id('sidebar');
+    const btnToggleSidebar    = $id('btn-toggle-sidebar');
+    const btnCloseSidebar     = $id('btn-close-sidebar');
+    const brushSizeInput      = $id('brush-size');
+    const brushSizeLabel      = $id('brush-size-label');
+    const colorSwatches       = document.querySelectorAll('.color-swatch');
+    const toolBrush           = $id('tool-brush');
+    const toolEraser          = $id('tool-eraser');
+    const toolUndo            = $id('tool-undo');
+    const toolRedo            = $id('tool-redo');
+    const toolClear           = $id('tool-clear');
+    const toolSave            = $id('tool-save');
+    const canvasContainer     = $id('canvas-container');
+    const errorToast          = $id('error-toast');
+    const errorToastMsg       = $id('error-toast-msg');
+    const errorToastDismiss   = $id('error-toast-dismiss');
+
+    // ══════════════════════════════════════════
+    // APPLICATION STATE
+    // ══════════════════════════════════════════
+    const state = {
+      // Drawing
+      color: '#00d4ff',
+      tool: 'brush',            // 'brush' | 'eraser'
+      brushSize: 10,
+      lastPoint: null,
+      gesture: 'none',          // 'none' | 'hover' | 'draw' | 'select' | 'erase' | 'fist'
+
+      // EMA smoothing
+      smoothX: 0,
+      smoothY: 0,
+      smoothingFactor: 0.35,    // Alpha: lower = smoother, higher = more responsive
+      firstSmooth: true,
+
+      // Hand tracking
+      handDetected: false,
+
+      // Undo / Redo history (canvas image data URIs)
+      undoStack: [],
+      redoStack: [],
+      maxHistory: 30,
+      needsSnapshot: false,     // True while a stroke is in progress (snapshot taken once per stroke)
+
+      // FPS tracking
+      frameCount: 0,
+      lastFpsTime: performance.now(),
+      fps: 0,
+
+      // Gesture toolbar selection cooldown (prevents rapid re-fires)
+      lastSelectTime: 0,
+
+      // Camera management
+      availableDevices: [],     // Array of { deviceId, label }
+      activeDeviceId: null,     // Currently selected deviceId
+      activeStream: null,       // Currently active MediaStream
+      handsInstance: null,       // MediaPipe Hands instance (reused across camera switches)
+      cameraInstance: null,      // MediaPipe Camera instance
+      isInitialized: false,     // True after first successful MediaPipe init
+    };
+
+    // ══════════════════════════════════════════
+    // ERROR HANDLING UTILITIES
+    // ══════════════════════════════════════════
+
+    /**
+     * Show a floating error toast at the bottom of the screen.
+     * Auto-dismisses after `durationMs` (0 = stay until manually dismissed).
+     */
+    let errorToastTimer = null;
+    function showError(message, durationMs = 8000) {
+      errorToastMsg.textContent = message;
+      errorToast.classList.add('visible');
+      clearTimeout(errorToastTimer);
+      if (durationMs > 0) {
+        errorToastTimer = setTimeout(() => hideError(), durationMs);
+      }
+    }
+
+    function hideError() {
+      errorToast.classList.remove('visible');
+      clearTimeout(errorToastTimer);
+    }
+
+    errorToastDismiss.addEventListener('click', hideError);
+
+    /**
+     * Translates raw camera/permission errors into user-friendly messages.
+     */
+    function friendlyErrorMessage(err) {
+      const msg = (err && err.message) ? err.message.toLowerCase() : String(err).toLowerCase();
+      const name = (err && err.name) ? err.name : '';
+
+      if (name === 'NotAllowedError' || msg.includes('permission denied') || msg.includes('not allowed')) {
+        return '🔒 Camera permission denied. Please allow camera access in your browser settings and reload the page.';
+      }
+      if (name === 'NotFoundError' || msg.includes('not found') || msg.includes('requested device not found')) {
+        return '📷 No camera found. Please connect a webcam or select a different camera from the dropdown.';
+      }
+      if (name === 'NotReadableError' || msg.includes('could not start') || msg.includes('not readable')) {
+        return '⚡ Camera is in use by another application. Close other apps using the camera and try again.';
+      }
+      if (name === 'OverconstrainedError' || msg.includes('overconstrained')) {
+        return '📐 Camera does not support the requested resolution. Trying with default settings…';
+      }
+      if (msg.includes('secure context') || msg.includes('https')) {
+        return '🔐 Camera access requires a secure context (HTTPS or localhost). Please serve this page over HTTPS.';
+      }
+      if (msg.includes('mediapipe') || msg.includes('wasm') || msg.includes('model')) {
+        return '🧠 Failed to load MediaPipe hand-tracking model. Check your internet connection and try again.';
+      }
+      return `❌ Camera error: ${err.message || err}`;
+    }
+
+    /**
+     * Show error in the startup overlay (before app launches).
+     */
+    function showStartupError(message) {
+      startupError.textContent = message;
+      startupError.classList.remove('hidden');
+      // Shake the button for attention
+      btnStart.style.animation = 'shake 0.5s ease-in-out';
+      setTimeout(() => { btnStart.style.animation = ''; }, 500);
+    }
+
+    function clearStartupError() {
+      startupError.classList.add('hidden');
+      startupError.textContent = '';
+    }
+
+    // ══════════════════════════════════════════
+    // CAMERA DEVICE ENUMERATION
+    // ══════════════════════════════════════════
+
+    /**
+     * Enumerate all video input devices and populate both dropdowns.
+     * Handles the case where labels are empty (before permission grant)
+     * by requesting a temporary stream first.
+     */
+    async function enumerateVideoDevices() {
+      try {
+        // First, try to enumerate. Labels may be empty without prior permission.
+        let devices = await navigator.mediaDevices.enumerateDevices();
+        let videoDevices = devices.filter(d => d.kind === 'videoinput');
+
+        // If labels are blank (no permission granted yet), request a temp stream to unlock labels
+        if (videoDevices.length > 0 && !videoDevices[0].label) {
+          try {
+            const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            tempStream.getTracks().forEach(t => t.stop()); // Release immediately
+            // Re-enumerate with labels now available
+            devices = await navigator.mediaDevices.enumerateDevices();
+            videoDevices = devices.filter(d => d.kind === 'videoinput');
+          } catch (permErr) {
+            // Permission denied — we'll still show devices by index
+            console.warn('Camera permission needed for device labels:', permErr);
+          }
+        }
+
+        state.availableDevices = videoDevices.map((d, i) => ({
+          deviceId: d.deviceId,
+          label: d.label || `Camera ${i + 1}`,
+        }));
+
+        populateCameraDropdowns();
+        return state.availableDevices;
+
+      } catch (err) {
+        console.error('Device enumeration failed:', err);
+        state.availableDevices = [];
+        populateCameraDropdowns();
+        return [];
+      }
+    }
+
+    /**
+     * Fill both the startup and header camera dropdowns with discovered devices.
+     */
+    function populateCameraDropdowns() {
+      const devs = state.availableDevices;
+
+      for (const selectEl of [cameraSelectStartup, cameraSelectHeader]) {
+        selectEl.innerHTML = '';
+
+        if (devs.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No cameras detected';
+          selectEl.appendChild(opt);
+          selectEl.disabled = true;
+        } else {
+          devs.forEach((dev, idx) => {
+            const opt = document.createElement('option');
+            opt.value = dev.deviceId;
+            opt.textContent = dev.label;
+            if (idx === 0) opt.selected = true;
+            selectEl.appendChild(opt);
+          });
+          selectEl.disabled = false;
+        }
+      }
+
+      // Update startup status text
+      if (devs.length === 0) {
+        cameraDetectStatus.textContent = '⚠️ No video devices found. Connect a camera and reload.';
+        cameraDetectStatus.style.color = '#fca5a5';
+        btnStart.disabled = true;
+      } else {
+        cameraDetectStatus.textContent = `✓ ${devs.length} camera${devs.length > 1 ? 's' : ''} detected`;
+        cameraDetectStatus.style.color = 'rgba(0,255,136,0.5)';
+        btnStart.disabled = false;
+      }
+    }
+
+    // ══════════════════════════════════════════
+    // CAMERA STREAM MANAGEMENT
+    // ══════════════════════════════════════════
+
+    /**
+     * Acquire a camera MediaStream for the given deviceId.
+     * Falls back to default device if the specific ID fails.
+     */
+    async function acquireCameraStream(deviceId) {
+      // Stop any existing stream tracks first
+      if (state.activeStream) {
+        state.activeStream.getTracks().forEach(t => t.stop());
+        state.activeStream = null;
+      }
+
+      const constraints = {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        },
+        audio: false,
+      };
+
+      // If a specific device was requested, constrain to it
+      if (deviceId) {
+        constraints.video.deviceId = { exact: deviceId };
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        state.activeStream = stream;
+        state.activeDeviceId = deviceId || stream.getVideoTracks()[0]?.getSettings()?.deviceId || '';
+        return stream;
+      } catch (primaryErr) {
+        console.warn(`Primary camera request failed (deviceId: ${deviceId}):`, primaryErr);
+
+        // If it was an overconstrained error, retry without resolution constraints
+        if (primaryErr.name === 'OverconstrainedError' || primaryErr.name === 'NotFoundError') {
+          try {
+            const fallbackConstraints = deviceId
+              ? { video: { deviceId: { exact: deviceId } }, audio: false }
+              : { video: true, audio: false };
+
+            const stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+            state.activeStream = stream;
+            state.activeDeviceId = deviceId || stream.getVideoTracks()[0]?.getSettings()?.deviceId || '';
+            showError('⚠️ Using reduced camera resolution — your device may not support 1280×720.', 5000);
+            return stream;
+          } catch (fallbackErr) {
+            throw fallbackErr; // Let caller handle
+          }
+        }
+
+        throw primaryErr;
+      }
+    }
+
+    /**
+     * Attach a MediaStream to the <video> element and wait for it to start playing.
+     */
+    function attachStreamToVideo(stream) {
+      return new Promise((resolve, reject) => {
+        videoEl.srcObject = stream;
+
+        const onPlaying = () => {
+          videoEl.removeEventListener('playing', onPlaying);
+          videoEl.removeEventListener('error', onError);
+          resolve();
+        };
+
+        const onError = (e) => {
+          videoEl.removeEventListener('playing', onPlaying);
+          videoEl.removeEventListener('error', onError);
+          reject(new Error('Video element failed to play stream.'));
+        };
+
+        videoEl.addEventListener('playing', onPlaying);
+        videoEl.addEventListener('error', onError);
+
+        videoEl.play().catch(reject);
+      });
+    }
+
+    // ══════════════════════════════════════════
+    // CANVAS SIZING
+    // ══════════════════════════════════════════
+
+    function resizeCanvases() {
+      const rect = canvasContainer.getBoundingClientRect();
+      const w = Math.floor(rect.width);
+      const h = Math.floor(rect.height);
+      if (w === 0 || h === 0) return;
+
+      for (const c of [overlayCanvas, drawingCanvas]) {
+        if (c.width !== w || c.height !== h) {
+          if (c === drawingCanvas) {
+            // Preserve drawing contents across resize
+            const tmp = document.createElement('canvas');
+            tmp.width = c.width;
+            tmp.height = c.height;
+            tmp.getContext('2d').drawImage(c, 0, 0);
+            c.width = w;
+            c.height = h;
+            drawCtx.drawImage(tmp, 0, 0);
+          } else {
+            c.width = w;
+            c.height = h;
+          }
+        }
+      }
+    }
+
+    const resizeObserver = new ResizeObserver(() => resizeCanvases());
+    resizeObserver.observe(canvasContainer);
+    resizeCanvases();
+
+    // Initial drawing context settings
+    drawCtx.lineCap = 'round';
+    drawCtx.lineJoin = 'round';
+    drawCtx.imageSmoothingEnabled = true;
+
+    // ══════════════════════════════════════════
+    // UNDO / REDO HISTORY
+    // ══════════════════════════════════════════
+
+    function saveSnapshot() {
+      const imgData = drawingCanvas.toDataURL('image/png');
+      state.undoStack.push(imgData);
+      if (state.undoStack.length > state.maxHistory) {
+        state.undoStack.shift();
+      }
+      state.redoStack = [];
+      updateHistoryButtons();
+    }
+
+    function undo() {
+      if (state.undoStack.length === 0) return;
+      state.redoStack.push(drawingCanvas.toDataURL('image/png'));
+      const prevData = state.undoStack.pop();
+      const img = new Image();
+      img.onload = () => {
+        drawCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+        drawCtx.drawImage(img, 0, 0);
+        updateHistoryButtons();
+      };
+      img.src = prevData;
+    }
+
+    function redo() {
+      if (state.redoStack.length === 0) return;
+      state.undoStack.push(drawingCanvas.toDataURL('image/png'));
+      const nextData = state.redoStack.pop();
+      const img = new Image();
+      img.onload = () => {
+        drawCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+        drawCtx.drawImage(img, 0, 0);
+        updateHistoryButtons();
+      };
+      img.src = nextData;
+    }
+
+    function clearCanvas() {
+      saveSnapshot();
+      drawCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+    }
+
+    function updateHistoryButtons() {
+      toolUndo.disabled = state.undoStack.length === 0;
+      toolRedo.disabled = state.redoStack.length === 0;
+    }
+
+    // ══════════════════════════════════════════
+    // TOOLS & COLORS (mouse / click UI)
+    // ══════════════════════════════════════════
+
+    colorSwatches.forEach(sw => {
+      sw.addEventListener('click', () => selectColor(sw.dataset.color));
+    });
+
+    function selectColor(color) {
+      state.color = color;
+      colorSwatches.forEach(sw => {
+        sw.classList.toggle('active', sw.dataset.color === color);
+      });
+    }
+
+    function selectTool(tool) {
+      state.tool = tool;
+      toolBrush.classList.toggle('active', tool === 'brush');
+      toolEraser.classList.toggle('active', tool === 'eraser');
+    }
+
+    toolBrush.addEventListener('click', () => selectTool('brush'));
+    toolEraser.addEventListener('click', () => selectTool('eraser'));
+    toolUndo.addEventListener('click', undo);
+    toolRedo.addEventListener('click', redo);
+    toolClear.addEventListener('click', clearCanvas);
+    toolSave.addEventListener('click', savePNG);
+
+    brushSizeInput.addEventListener('input', () => {
+      state.brushSize = parseInt(brushSizeInput.value, 10);
+      brushSizeLabel.textContent = state.brushSize;
+    });
+
+    // Sidebar toggle
+    btnToggleSidebar.addEventListener('click', () => sidebar.classList.toggle('closed'));
+    btnCloseSidebar.addEventListener('click', () => sidebar.classList.add('closed'));
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); }
+      else if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); }
+      else if (!e.ctrlKey && (e.key === 'b' || e.key === 'B')) selectTool('brush');
+      else if (!e.ctrlKey && (e.key === 'e' || e.key === 'E')) selectTool('eraser');
+      else if (!e.ctrlKey && (e.key === 's' || e.key === 'S')) savePNG();
+      else if (!e.ctrlKey && (e.key === 'c' || e.key === 'C')) clearCanvas();
+    });
+
+    // ══════════════════════════════════════════
+    // SAVE PNG
+    // ══════════════════════════════════════════
+
+    function savePNG() {
+      try {
+        const exportCanvas = document.createElement('canvas');
+        exportCanvas.width = drawingCanvas.width;
+        exportCanvas.height = drawingCanvas.height;
+        const exportCtx = exportCanvas.getContext('2d');
+
+        // Dark background
+        exportCtx.fillStyle = '#0a0a14';
+        exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+        exportCtx.drawImage(drawingCanvas, 0, 0);
+
+        const link = document.createElement('a');
+        link.download = `UdiDraw_${new Date().toISOString().slice(0,19).replace(/[:-]/g,'')}.png`;
+        link.href = exportCanvas.toDataURL('image/png');
+        link.click();
+      } catch (err) {
+        showError('Failed to save PNG: ' + err.message);
+      }
+    }
+
+    // ══════════════════════════════════════════
+    // GESTURE DETECTION
+    // ══════════════════════════════════════════
+
+    // MediaPipe landmark indices
+    const FINGER_TIPS = [8, 12, 16, 20];  // Index, Middle, Ring, Pinky tip
+    const FINGER_PIPS = [6, 10, 14, 18];  // Index, Middle, Ring, Pinky PIP
+    const FINGER_MCPS = [5, 9, 13, 17];   // Index, Middle, Ring, Pinky MCP
+
+    /**
+     * Returns true if the given finger (0=index, 1=middle, 2=ring, 3=pinky)
+     * has its TIP above both PIP and MCP (i.e., it's extended upward).
+     */
+    function isFingerExtended(landmarks, fingerIdx) {
+      const tip = landmarks[FINGER_TIPS[fingerIdx]];
+      const pip = landmarks[FINGER_PIPS[fingerIdx]];
+      const mcp = landmarks[FINGER_MCPS[fingerIdx]];
+      return tip.y < pip.y && tip.y < mcp.y;
+    }
+
+    /**
+     * Classify current hand pose into a gesture string.
+     */
+    function detectGesture(landmarks) {
+      const indexUp  = isFingerExtended(landmarks, 0);
+      const middleUp = isFingerExtended(landmarks, 1);
+      const ringUp   = isFingerExtended(landmarks, 2);
+      const pinkyUp  = isFingerExtended(landmarks, 3);
+
+      // FIST (Closed Palm): All 4 fingers curled → Eraser mode
+      // Check this FIRST so a closed fist doesn't accidentally trigger other gestures
+      if (!indexUp && !middleUp && !ringUp && !pinkyUp) {
+        return 'fist';
+      }
+
+      // ERASE: 3 fingers extended (Index + Middle + Ring) — wide brush erase
+      if (indexUp && middleUp && ringUp && !pinkyUp) {
+        return 'erase';
+      }
+
+      // SELECT: Index + Middle (peace sign)
+      if (indexUp && middleUp && !ringUp && !pinkyUp) {
+        return 'select';
+      }
+
+      // DRAW: Only index finger extended
+      if (indexUp && !middleUp && !ringUp && !pinkyUp) {
+        return 'draw';
+      }
+
+      // Everything else is HOVER (e.g., thumb only, all fingers up, etc.)
+      return 'hover';
+    }
+
+    // ══════════════════════════════════════════
+    // COORDINATE SMOOTHING (EMA)
+    // ══════════════════════════════════════════
+
+    function smoothCoord(rawX, rawY) {
+      if (state.firstSmooth) {
+        state.smoothX = rawX;
+        state.smoothY = rawY;
+        state.firstSmooth = false;
+      } else {
+        const a = state.smoothingFactor;
+        state.smoothX = a * rawX + (1 - a) * state.smoothX;
+        state.smoothY = a * rawY + (1 - a) * state.smoothY;
+      }
+      return { x: state.smoothX, y: state.smoothY };
+    }
+
+    // ══════════════════════════════════════════
+    // FREEHAND STROKE DRAWING
+    // ══════════════════════════════════════════
+
+    function drawStroke(x, y, forceErase = false) {
+      const isErasing = forceErase || state.tool === 'eraser';
+
+      // ── First point of a new stroke ──────────────────────────────────
+      if (!state.lastPoint) {
+        state.lastPoint = { x, y };
+        // Plant a dot at the very first touch point so single taps show up
+        if (!state.needsSnapshot) {
+          saveSnapshot();
+          state.needsSnapshot = true;
+        }
+        drawCtx.beginPath();
+        if (isErasing) {
+          drawCtx.globalCompositeOperation = 'destination-out';
+          drawCtx.fillStyle = 'rgba(0,0,0,1)';
+          drawCtx.arc(x, y, (state.brushSize * 3) / 2, 0, Math.PI * 2);
+        } else {
+          drawCtx.globalCompositeOperation = 'source-over';
+          drawCtx.fillStyle = state.color;
+          drawCtx.shadowColor = state.color;
+          drawCtx.shadowBlur = state.brushSize * 0.8;
+          drawCtx.arc(x, y, state.brushSize / 2, 0, Math.PI * 2);
+        }
+        drawCtx.fill();
+        drawCtx.shadowColor = 'transparent';
+        drawCtx.shadowBlur = 0;
+        return;
+      }
+
+      if (!state.needsSnapshot) {
+        saveSnapshot();
+        state.needsSnapshot = true;
+      }
+
+      // ── Configure context ─────────────────────────────────────────────
+      drawCtx.lineCap = 'round';
+      drawCtx.lineJoin = 'round';
+
+      if (isErasing) {
+        drawCtx.globalCompositeOperation = 'destination-out';
+        drawCtx.strokeStyle = 'rgba(0,0,0,1)';
+        drawCtx.lineWidth = state.brushSize * 3;
+      } else {
+        drawCtx.globalCompositeOperation = 'source-over';
+        drawCtx.strokeStyle = state.color;
+        drawCtx.lineWidth = state.brushSize;
+        drawCtx.shadowColor = state.color;
+        drawCtx.shadowBlur = state.brushSize * 0.8;
+      }
+
+      // ── Midpoint Bézier — guarantees continuous, gap-free strokes ─────
+      // Strategy: draw from lastPoint → midpoint(lastPoint, current) using
+      // lastPoint as both the start and control point, then update lastPoint
+      // to current. Each frame's segment connects seamlessly to the next.
+      const midX = (state.lastPoint.x + x) / 2;
+      const midY = (state.lastPoint.y + y) / 2;
+
+      drawCtx.beginPath();
+      drawCtx.moveTo(state.lastPoint.x, state.lastPoint.y);
+      drawCtx.quadraticCurveTo(state.lastPoint.x, state.lastPoint.y, midX, midY);
+      // Then continue straight to the current point so nothing is skipped
+      drawCtx.lineTo(x, y);
+      drawCtx.stroke();
+
+      // Clear shadow after stroke to prevent glow bleed on subsequent ops
+      drawCtx.shadowColor = 'transparent';
+      drawCtx.shadowBlur = 0;
+
+      state.lastPoint = { x, y };
+    }
+
+    function stopDrawing() {
+      state.lastPoint = null;
+      state.needsSnapshot = false;
+      // Do NOT reset firstSmooth here — the EMA position memory prevents
+      // the cursor from teleporting when a new stroke starts nearby.
+    }
+
+    // ══════════════════════════════════════════
+    // CONVEX HULL HAND-SHAPE ERASER (Fist Gesture)
+    // ══════════════════════════════════════════
+
+    /**
+     * Andrew's monotone-chain convex hull — O(n log n).
+     * Returns the minimal clockwise polygon enclosing all points.
+     */
+    function convexHull(points) {
+      if (points.length < 3) return points;
+      const pts = [...points].sort((a, b) => a.x !== b.x ? a.x - b.x : a.y - b.y);
+      const cross = (O, A, B) => (A.x - O.x) * (B.y - O.y) - (A.y - O.y) * (B.x - O.x);
+
+      const lower = [];
+      for (const p of pts) {
+        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0)
+          lower.pop();
+        lower.push(p);
+      }
+      const upper = [];
+      for (let i = pts.length - 1; i >= 0; i--) {
+        const p = pts[i];
+        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0)
+          upper.pop();
+        upper.push(p);
+      }
+      lower.pop();
+      upper.pop();
+      return lower.concat(upper);
+    }
+
+    /**
+     * Erase the filled convex hull of the hand skeleton every frame.
+     * Called instead of drawStroke() when gesture === 'fist'.
+     * @param {Array}  landmarks  MediaPipe landmark array (21 points)
+     * @param {number} w          Canvas width  (pixels)
+     * @param {number} h          Canvas height (pixels)
+     */
+    function eraseHandShape(landmarks, w, h) {
+      // Convert normalised landmarks → mirrored canvas coordinates
+      const pts = landmarks.map(lm => ({
+        x: (1 - lm.x) * w,
+        y: lm.y * h,
+      }));
+
+      const hull = convexHull(pts);
+      if (hull.length < 3) return;
+
+      // Take a single undo snapshot at the start of each fist-erase gesture
+      if (!state.needsSnapshot) {
+        saveSnapshot();
+        state.needsSnapshot = true;
+      }
+
+      drawCtx.save();
+      drawCtx.globalCompositeOperation = 'destination-out';
+      drawCtx.beginPath();
+      drawCtx.moveTo(hull[0].x, hull[0].y);
+      for (let i = 1; i < hull.length; i++) {
+        drawCtx.lineTo(hull[i].x, hull[i].y);
+      }
+      drawCtx.closePath();
+      drawCtx.fill();   // fill() works without a fillStyle in destination-out mode
+      drawCtx.restore();
+    }
+
+    // ══════════════════════════════════════════
+    // HAND SKELETON RENDERING
+    // ══════════════════════════════════════════
+
+    const HAND_CONNECTIONS = [
+      [0,1],[1,2],[2,3],[3,4],           // Thumb
+      [0,5],[5,6],[6,7],[7,8],           // Index
+      [0,9],[9,10],[10,11],[11,12],      // Middle
+      [0,13],[13,14],[14,15],[15,16],    // Ring
+      [0,17],[17,18],[18,19],[19,20],    // Pinky
+      [5,9],[9,13],[13,17],              // Palm cross-links
+    ];
+
+    function drawHandSkeleton(landmarks, w, h, gesture) {
+      overlayCtx.clearRect(0, 0, w, h);
+
+      let lineColor, dotColor;
+      switch (gesture) {
+        case 'draw':
+          lineColor = 'rgba(0, 212, 255, 0.55)';
+          dotColor  = 'rgba(0, 212, 255, 0.9)';
+          break;
+        case 'select':
+          lineColor = 'rgba(168, 85, 247, 0.55)';
+          dotColor  = 'rgba(168, 85, 247, 0.9)';
+          break;
+        case 'erase':
+          lineColor = 'rgba(248, 113, 113, 0.6)';
+          dotColor  = 'rgba(248, 113, 113, 0.95)';
+          break;
+        case 'fist':
+          lineColor = 'rgba(255, 80, 80, 0.75)';
+          dotColor  = 'rgba(255, 80, 80, 1.0)';
+          break;
+        default:
+          lineColor = 'rgba(255, 255, 255, 0.2)';
+          dotColor  = 'rgba(255, 255, 255, 0.45)';
+      }
+
+      // Draw bone connections
+      overlayCtx.strokeStyle = lineColor;
+      overlayCtx.lineWidth = 2;
+      for (const [i, j] of HAND_CONNECTIONS) {
+        const a = landmarks[i];
+        const b = landmarks[j];
+        overlayCtx.beginPath();
+        overlayCtx.moveTo((1 - a.x) * w, a.y * h); // Mirror X for selfie view
+        overlayCtx.lineTo((1 - b.x) * w, b.y * h);
+        overlayCtx.stroke();
+      }
+
+      // Draw landmark dots
+      for (let i = 0; i < landmarks.length; i++) {
+        const lm = landmarks[i];
+        const px = (1 - lm.x) * w;
+        const py = lm.y * h;
+        const radius = (i === 8 || i === 4) ? 5 : 3; // Larger for index & thumb tips
+
+        overlayCtx.beginPath();
+        overlayCtx.arc(px, py, radius, 0, Math.PI * 2);
+        overlayCtx.fillStyle = dotColor;
+        overlayCtx.fill();
+      }
+    }
+
+    // ══════════════════════════════════════════
+    // GESTURE-BASED TOOLBAR SELECTION
+    // ══════════════════════════════════════════
+
+    function handleGestureSelect(screenX, screenY) {
+      const now = Date.now();
+      if (now - state.lastSelectTime < 400) return; // 400ms cooldown
+
+      const el = document.elementFromPoint(screenX, screenY);
+      if (!el) return;
+
+      // Color swatch hit?
+      const swatch = el.closest('.color-swatch');
+      if (swatch && swatch.dataset.color) {
+        selectColor(swatch.dataset.color);
+        state.lastSelectTime = now;
+        flashElement(swatch);
+        return;
+      }
+
+      // Tool button hit?
+      const toolBtn = el.closest('.tool-btn');
+      if (toolBtn && !toolBtn.disabled) {
+        toolBtn.click();
+        state.lastSelectTime = now;
+        flashElement(toolBtn);
+        return;
+      }
+    }
+
+    function flashElement(el) {
+      el.classList.add('gesture-hover');
+      setTimeout(() => el.classList.remove('gesture-hover'), 350);
+    }
+
+    // ══════════════════════════════════════════
+    // UI UPDATE HELPERS
+    // ══════════════════════════════════════════
+
+    function updateGestureUI(gesture) {
+      const icons  = { none: '👋', hover: '🖐️', draw: '☝️', select: '✌️', erase: '🧹', fist: '✊' };
+      const labels = { none: 'No Hand', hover: 'Tracking', draw: 'Drawing', select: 'Selecting', erase: 'Erasing', fist: 'Eraser (Fist)' };
+      const bgColors = {
+        none:   'rgba(255,255,255,0.05)',
+        hover:  'rgba(255,255,255,0.08)',
+        draw:   'rgba(0,212,255,0.12)',
+        select: 'rgba(168,85,247,0.12)',
+        erase:  'rgba(248,113,113,0.15)',
+        fist:   'rgba(248,113,113,0.20)',
+      };
+
+      gestureIcon.textContent = icons[gesture] || icons.none;
+      gestureLabel.textContent = labels[gesture] || labels.none;
+      gestureIndicator.style.background = bgColors[gesture] || bgColors.none;
+    }
+
+    function updateFPS() {
+      state.frameCount++;
+      const now = performance.now();
+      const elapsed = now - state.lastFpsTime;
+      if (elapsed >= 1000) {
+        state.fps = Math.round((state.frameCount * 1000) / elapsed);
+        fpsDisplay.textContent = state.fps;
+        state.frameCount = 0;
+        state.lastFpsTime = now;
+      }
+    }
+
+    // ══════════════════════════════════════════
+    // CURSOR RING RENDERING
+    // ══════════════════════════════════════════
+
+    function updateCursor(screenX, screenY, gesture) {
+      // For fist gesture, the red hand skeleton IS the eraser indicator —
+      // hide the small cursor ring so it doesn't clutter the visual.
+      if (gesture === 'fist') {
+        cursorRing.style.display = 'none';
+        return;
+      }
+
+      cursorRing.style.display = 'block';
+      cursorRing.style.left = screenX + 'px';
+      cursorRing.style.top = screenY + 'px';
+
+      const isErasing = gesture === 'erase' || gesture === 'fist' || state.tool === 'eraser';
+      const size = isErasing ? state.brushSize * 3 : state.brushSize;
+      const displaySize = Math.max(size * 2, 20);
+      cursorRing.style.width = displaySize + 'px';
+      cursorRing.style.height = displaySize + 'px';
+
+      if (gesture === 'erase' || gesture === 'fist') {
+        cursorRing.style.borderColor = 'rgba(248, 113, 113, 0.85)';
+        cursorRing.style.boxShadow = '0 0 14px rgba(248, 113, 113, 0.5)';
+      } else if (gesture === 'draw') {
+        const c = (state.tool === 'eraser') ? 'rgba(255,255,255,0.5)' : state.color;
+        cursorRing.style.borderColor = c;
+        cursorRing.style.boxShadow = (state.tool === 'eraser') ? 'none' : `0 0 12px ${state.color}`;
+      } else if (gesture === 'select') {
+        cursorRing.style.borderColor = 'rgba(168, 85, 247, 0.7)';
+        cursorRing.style.boxShadow = '0 0 12px rgba(168,85,247,0.4)';
+      } else {
+        cursorRing.style.borderColor = 'rgba(255,255,255,0.3)';
+        cursorRing.style.boxShadow = 'none';
+      }
+    }
+
+    // ══════════════════════════════════════════
+    // MEDIAPIPE RESULTS CALLBACK
+    // ══════════════════════════════════════════
+
+    function onResults(results) {
+      updateFPS();
+      const w = overlayCanvas.width;
+      const h = overlayCanvas.height;
+
+      // No hands detected
+      if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+        overlayCtx.clearRect(0, 0, w, h);
+        cursorRing.style.display = 'none';
+        if (state.gesture !== 'none') {
+          state.gesture = 'none';
+          stopDrawing();
+          state.firstSmooth = true; // Snap to new hand position on next appearance
+          updateGestureUI('none');
+        }
+        state.handDetected = false;
+        return;
+      }
+
+      state.handDetected = true;
+      const landmarks = results.multiHandLandmarks[0]; // First hand only
+      const gesture = detectGesture(landmarks);
+      state.gesture = gesture;
+      updateGestureUI(gesture);
+
+      // Draw hand skeleton on overlay
+      drawHandSkeleton(landmarks, w, h, gesture);
+
+      // ── Fingertip coordinate ─────────────────────────────────────────
+      // For fist gesture, use the middle-finger MCP (landmark 9) as the
+      // representative "palm center" point for erasing — it stays stable
+      // even when all fingers are curled.
+      const trackingLm = (gesture === 'fist') ? landmarks[9] : landmarks[8];
+      const rawX = (1 - trackingLm.x) * w;
+      const rawY = trackingLm.y * h;
+
+      // Apply EMA smoothing
+      const smoothed = smoothCoord(rawX, rawY);
+      const sx = smoothed.x;
+      const sy = smoothed.y;
+
+      // Map canvas coords → screen coords (for cursor & elementFromPoint)
+      const rect = canvasContainer.getBoundingClientRect();
+      const scaleX = rect.width / w;
+      const scaleY = rect.height / h;
+      const screenX = rect.left + sx * scaleX;
+      const screenY = rect.top + sy * scaleY;
+
+      // Update floating cursor
+      updateCursor(screenX, screenY, gesture);
+
+      // ── Gesture actions ──────────────────────────────────────────────
+      if (gesture === 'draw') {
+        // Index-only → draw with current brush color
+        drawStroke(sx, sy, false);
+      } else if (gesture === 'fist') {
+        // Closed fist → erase the ENTIRE hand-shaped area (convex hull of all landmarks)
+        if (state.lastPoint) stopDrawing(); // end any active draw stroke
+        eraseHandShape(landmarks, w, h);
+      } else if (gesture === 'erase') {
+        // 3-finger spread → erase (brush erase pass)
+        drawStroke(sx, sy, true);
+      } else {
+        // Any non-drawing gesture → end current stroke
+        if (state.lastPoint) {
+          stopDrawing();
+        }
+        if (gesture === 'select') {
+          handleGestureSelect(screenX, screenY);
+        }
+      }
+    }
+
+    // ══════════════════════════════════════════
+    // MEDIAPIPE INITIALIZATION & CAMERA START
+    // ══════════════════════════════════════════
+
+    /**
+     * Initialize the MediaPipe Hands model (once) and start the camera feed loop.
+     * This is called on first start and when switching cameras.
+     */
+    async function initMediaPipe(deviceId) {
+      // ── Step 1: Create Hands instance (reuse if already created) ──
+      if (!state.handsInstance) {
+        try {
+          const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+          });
+
+          hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.6,
+          });
+
+          hands.onResults(onResults);
+          state.handsInstance = hands;
+        } catch (err) {
+          throw new Error('Failed to initialize MediaPipe Hands: ' + err.message);
+        }
+      }
+
+      // ── Step 2: Stop existing camera loop if any ──
+      if (state.cameraInstance) {
+        try { state.cameraInstance.stop(); } catch (_) {}
+        state.cameraInstance = null;
+      }
+
+      // ── Step 3: Acquire camera stream ──
+      const stream = await acquireCameraStream(deviceId);
+      await attachStreamToVideo(stream);
+
+      // ── Step 4: Start MediaPipe Camera loop ──
+      const camera = new Camera(videoEl, {
+        onFrame: async () => {
+          try {
+            await state.handsInstance.send({ image: videoEl });
+          } catch (frameErr) {
+            // Swallow individual frame errors (e.g., model busy)
+            console.warn('Frame processing error:', frameErr);
+          }
+        },
+        width: 1280,
+        height: 720,
+      });
+
+      await camera.start();
+      state.cameraInstance = camera;
+
+      // ── Step 5: Update status ──
+      statusDot.className = 'status-dot active';
+      statusText.textContent = 'Camera Active';
+      state.isInitialized = true;
+
+      // Sync header dropdown selection
+      cameraSelectHeader.value = state.activeDeviceId || '';
+    }
+
+    /**
+     * Switch to a different camera device at runtime.
+     */
+    async function switchCamera(newDeviceId) {
+      if (!newDeviceId || newDeviceId === state.activeDeviceId) return;
+
+      statusDot.className = 'status-dot loading';
+      statusText.textContent = 'Switching camera…';
+
+      try {
+        await initMediaPipe(newDeviceId);
+        hideError();
+      } catch (err) {
+        console.error('Camera switch failed:', err);
+        showError(friendlyErrorMessage(err));
+        statusDot.className = 'status-dot inactive';
+        statusText.textContent = 'Camera Error';
+        // Revert dropdown to previous selection
+        cameraSelectHeader.value = state.activeDeviceId || '';
+      }
+    }
+
+    // Header camera dropdown change handler
+    cameraSelectHeader.addEventListener('change', (e) => {
+      switchCamera(e.target.value);
+    });
+
+    // ══════════════════════════════════════════
+    // STARTUP FLOW
+    // ══════════════════════════════════════════
+
+    // Enumerate cameras as soon as page loads (best-effort; labels may be blank)
+    enumerateVideoDevices().then(() => {
+      // If we found devices, enable the start button
+      if (state.availableDevices.length > 0) {
+        btnStart.disabled = false;
+      }
+    });
+
+    // Listen for device changes (e.g., user plugs in USB camera)
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+      navigator.mediaDevices.addEventListener('devicechange', async () => {
+        await enumerateVideoDevices();
+        // If we're already running, don't interrupt — just update dropdowns
+      });
+    }
+
+    // Main start button handler
+    btnStart.addEventListener('click', async () => {
+      clearStartupError();
+      btnStart.textContent = '⏳ Loading MediaPipe…';
+      btnStart.disabled = true;
+
+      const selectedDeviceId = cameraSelectStartup.value || '';
+
+      try {
+        // Acquire the stream first to potentially unlock device labels
+        await initMediaPipe(selectedDeviceId);
+
+        // Re-enumerate to get proper labels if they were blank before
+        await enumerateVideoDevices();
+
+        // Dismiss startup overlay
+        startupOverlay.classList.add('hidden');
+
+        // Save initial blank canvas state for undo
+        saveSnapshot();
+
+      } catch (err) {
+        console.error('Startup failed:', err);
+        const msg = friendlyErrorMessage(err);
+        showStartupError(msg);
+        btnStart.textContent = '🎥 Enable Camera & Start';
+        btnStart.disabled = false;
+        statusDot.className = 'status-dot inactive';
+        statusText.textContent = 'Error';
+      }
+    });
+
+  })();
+  </script>
+</body>
+</html>
